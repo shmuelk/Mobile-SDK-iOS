@@ -58,7 +58,7 @@
     
     self.selectedWaypoint.altitude = [self.altitudeTextfield.text floatValue];
     self.selectedWaypoint.isUsingWaypointMaxFlightSpeed = self.useMaxSwitch.isOn;
-    self.selectedWaypoint.turnMode = self.clockwiseSwitch.isOn ? DJIWaypointTurnClockwise : DJIWaypointTurnCounterClockwise;
+    self.selectedWaypoint.turnMode = self.clockwiseSwitch.isOn ? DJIWaypointV2TurnModeClockwise : DJIWaypointV2TurnModeCounterClockwise;
     self.selectedWaypoint.maxFlightSpeed = [self.maxSpeedTextfield.text floatValue];
     self.selectedWaypoint.autoFlightSpeed = [self.autoSpeedTextfield.text floatValue];
     self.selectedWaypoint.heading = 0;
