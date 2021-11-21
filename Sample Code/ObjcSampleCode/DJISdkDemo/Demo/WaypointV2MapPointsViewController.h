@@ -8,11 +8,12 @@
 
 #import <UIKit/UIKit.h>
 #import <DJISDK/DJIFlightController.h>
+#import <DJISDK/DJIRTK.h>
 @class WaypointV2ConfigItem;
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface WaypointV2MapPointsViewController : UIViewController <DJIFlightControllerDelegate, UIGestureRecognizerDelegate>
+@interface WaypointV2MapPointsViewController : UIViewController <DJIFlightControllerDelegate, UIGestureRecognizerDelegate, DJIRTKDelegate>
 
 @property (nonatomic, strong) WaypointV2ConfigItem *missionConfig;
 

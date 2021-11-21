@@ -35,6 +35,12 @@
 @property (nonatomic, strong) DJIFlightControllerState *currentState;
 @property (nonatomic, strong) DJIMutableWaypointV2Mission *waypointMission;
 @property (nonatomic, assign) CLLocationCoordinate2D aircraftLocation;
+@property (nonatomic, assign) double aircraftAltitude;
+@property (nonatomic, assign) bool rtkAvailable;
+@property (nonatomic, assign) bool rtkActive;
+@property (nonatomic, assign) CLLocationCoordinate2D rtkAircraftLocation;
+@property (nonatomic, assign) double rtkAircraftAltitude;
+@property (nonatomic, assign) int satelliteCount;
 @property (nonatomic, strong) DJIAircraftAnnotation *aircraftAnnotation;
 @property (nonatomic, strong) DJIMapView *djiMapView;
 
@@ -93,6 +99,27 @@ static NSUInteger kMissionId = 1001;
             target.tipLabel.text = @"Mission stopped";
         }
     }];
+    
+    [[[DJISDKManager missionControl] waypointV2MissionOperator] addListenerToExecutionEvent:self
+        withQueue:dispatch_get_main_queue() andBlock:^(DJIWaypointV2MissionExecutionEvent * _Nonnull event) {
+        if (event.currentState == DJIWaypointV2MissionStateReadyToUpload &&
+                event.previousState == DJIWaypointV2MissionStateExecuting) {
+            [NSThread sleepForTimeInterval:0.5];
+            NSLog(@"===> Mission ended location (fc):  lat=%.9f, long=%.9f",
+                  target.aircraftLocation.latitude, target.aircraftLocation.longitude);
+            if (target.rtkActive) {
+                NSLog(@"===> Mission ended location (rtk): lat=%.9f, long=%.9f",
+                      target.rtkAircraftLocation.latitude, target.rtkAircraftLocation.longitude);
+            }
+            [NSThread sleepForTimeInterval:0.5];
+            NSLog(@"===> Mission ended location (fc) after wait:  lat=%.9f, long=%.9f",
+                  target.aircraftLocation.latitude, target.aircraftLocation.longitude);
+            if (target.rtkActive) {
+                NSLog(@"===> Mission ended location (rtk) after wait: lat=%.9f, long=%.9f",
+                      target.rtkAircraftLocation.latitude, target.rtkAircraftLocation.longitude);
+            }
+        }
+    }];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -100,21 +127,30 @@ static NSUInteger kMissionId = 1001;
     DJIBaseProduct *product = [DJISDKManager product];
     if (product && [product isKindOfClass:[DJIAircraft class]]) {
         [(DJIAircraft *)product flightController].delegate = self;
-        DJIFlightController *fc = [(DJIAircraft *)product flightController];
-        if (!fc || fc.simulator.isSimulatorActive) {
-            return;
+        //DJIFlightController *fc = [(DJIAircraft *)product flightController];
+        //if (!fc || fc.simulator.isSimulatorActive) {
+        //    return;
+        //}
+        //CLLocationCoordinate2D location = CLLocationCoordinate2DMake(22.53, 113.95);
+        //WeakRef(target);
+        //[fc.simulator startWithLocation:location updateFrequency:20 GPSSatellitesNumber:20 withCompletion:^(NSError * _Nullable error) {
+        //    if (error) {
+        //        ShowResult(@"Start flight simulator error:%@", error.description);
+        //    } else {
+        //        WeakReturn(target);
+        //        [target.djiMapView refreshMapViewRegion];
+        //        [target.djiMapView forceRefreshLimitSpaces];
+        //    }
+        //}];
+        
+        if ([(DJIAircraft *)product flightController].RTK != nil) {
+            [(DJIAircraft *)product flightController].RTK.delegate = self;
+            self.rtkAvailable = true;
         }
-        CLLocationCoordinate2D location = CLLocationCoordinate2DMake(22.53, 113.95);
-        WeakRef(target);
-        [fc.simulator startWithLocation:location updateFrequency:20 GPSSatellitesNumber:20 withCompletion:^(NSError * _Nullable error) {
-            if (error) {
-                ShowResult(@"Start flight simulator error:%@", error.description);
-            } else {
-                WeakReturn(target);
-                [target.djiMapView refreshMapViewRegion];
-                [target.djiMapView forceRefreshLimitSpaces];
-            }
-        }];
+        else {
+            self.rtkAvailable = false;
+        }
+        self.rtkActive = false;
     }
 }
 
@@ -124,9 +160,13 @@ static NSUInteger kMissionId = 1001;
     if (product && [product isKindOfClass:[DJIAircraft class]]) {
         if ([(DJIAircraft *)product flightController].delegate == self) {
             [(DJIAircraft *)product flightController].delegate = nil;
-            DJIFlightController *fc = [(DJIAircraft *)product flightController];
-            if (fc.simulator.isSimulatorActive) {
-                [fc.simulator stopWithCompletion:nil];
+            //DJIFlightController *fc = [(DJIAircraft *)product flightController];
+            //if (fc.simulator.isSimulatorActive) {
+            //    [fc.simulator stopWithCompletion:nil];
+            //}
+            if ([(DJIAircraft *)product flightController].RTK != nil &&
+                      [(DJIAircraft *)product flightController].RTK.delegate == self) {
+                [(DJIAircraft *)product flightController].RTK.delegate = nil;
             }
         }
     }
@@ -259,18 +299,135 @@ static NSUInteger kMissionId = 1001;
     CGPoint point = [sender locationInView:self.mapView];
     CLLocationCoordinate2D touchedCoordinate = [self.mapView convertPoint:point toCoordinateFromView:self.mapView];
     
+    if (self.waypoints.count == 0) {
+        CLLocationCoordinate2D origin;
+        
+        if (self.rtkActive) {
+            origin = self.rtkAircraftLocation;
+        }
+        else {
+            origin = self.aircraftLocation;
+        }
+        CLLocationCoordinate2D location = origin;
+        
+        DJIWaypointV2 *currentpoint = [[DJIWaypointV2 alloc] initWithCoordinate:location];
+        currentpoint.altitude = 3;
+        currentpoint.autoFlightSpeed = 3;
+        currentpoint.maxFlightSpeed = 5;
+        currentpoint.flightPathMode = DJIWaypointV2FlightPathModeGoToPointInAStraightLineAndStop;
+        currentpoint.headingMode = DJIWaypointV2HeadingModeAuto;
+        currentpoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
+        [self.waypoints addObject:currentpoint];
+        
+        location.latitude += 0.00008;
+        
+        currentpoint = [[DJIWaypointV2 alloc] initWithCoordinate:location];
+        currentpoint.altitude = 3;
+        currentpoint.autoFlightSpeed = 3;
+        currentpoint.maxFlightSpeed = 5;
+        currentpoint.flightPathMode = DJIWaypointV2FlightPathModeGoToPointInAStraightLineAndStop;
+        currentpoint.headingMode = DJIWaypointV2HeadingModeAuto;
+        currentpoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
+        [self.waypoints addObject:currentpoint];
+        
+        NSLog(@"===> Preparing mission, origin: lat=%.9f, long=%.9f",
+              origin.latitude, origin.longitude);
+        NSLog(@"===> Preparing mission, target location: lat=%.9f, long=%.9f",
+              location.latitude, location.longitude);
+        
+        // Zig zag after stright flight above
+        // location = origin;
+        // location.latitude += 0.00008;
+        // location.longitude += 0.00002;
+        
+        // currentpoint = [[DJIWaypointV2 alloc] initWithCoordinate:location];
+        // currentpoint.altitude = 3;
+        // currentpoint.autoFlightSpeed = 3;
+        // currentpoint.maxFlightSpeed = 5;
+        // currentpoint.flightPathMode = DJIWaypointV2FlightPathModeGoToPointInAStraightLineAndStop;
+        // currentpoint.headingMode = DJIWaypointV2HeadingModeAuto;
+        // currentpoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
+        // [self.waypoints addObject:currentpoint];
+        
+        // location = origin;
+        // location.longitude += 0.00002;
+        
+        // currentpoint = [[DJIWaypointV2 alloc] initWithCoordinate:location];
+        // currentpoint.altitude = 3;
+        // currentpoint.autoFlightSpeed = 3;
+        // currentpoint.maxFlightSpeed = 5;
+        // currentpoint.flightPathMode = DJIWaypointV2FlightPathModeGoToPointInAStraightLineAndStop;
+        // currentpoint.headingMode = DJIWaypointV2HeadingModeAuto;
+        // currentpoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
+        // [self.waypoints addObject:currentpoint];
+        
+        // location = origin;
+        // location.longitude += 0.00004;
+        
+        // currentpoint = [[DJIWaypointV2 alloc] initWithCoordinate:location];
+        // currentpoint.altitude = 3;
+        // currentpoint.autoFlightSpeed = 0.5;
+        // currentpoint.maxFlightSpeed = 1;
+        // currentpoint.flightPathMode = DJIWaypointV2FlightPathModeGoToPointInAStraightLineAndStop;
+        // currentpoint.headingMode = DJIWaypointV2HeadingModeAuto;
+        // currentpoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
+        // [self.waypoints addObject:currentpoint];
+        
+        // location = origin;
+        // location.latitude += 0.00008;
+        // location.longitude += 0.00004;
+        
+        // currentpoint = [[DJIWaypointV2 alloc] initWithCoordinate:location];
+        // currentpoint.altitude = 3;
+        // currentpoint.autoFlightSpeed = 0.5;
+        // currentpoint.maxFlightSpeed = 1;
+        // currentpoint.flightPathMode = DJIWaypointV2FlightPathModeGoToPointInAStraightLineAndStop;
+        // currentpoint.headingMode = DJIWaypointV2HeadingModeAuto;
+        // currentpoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
+        // [self.waypoints addObject:currentpoint];
+        
+        // location = origin;
+        // location.latitude += 0.00008;
+        // location.longitude += 0.00006;
+        
+        // currentpoint = [[DJIWaypointV2 alloc] initWithCoordinate:location];
+        // currentpoint.altitude = 3;
+        // currentpoint.autoFlightSpeed = 0.5;
+        // currentpoint.maxFlightSpeed = 1;
+        // currentpoint.flightPathMode = DJIWaypointV2FlightPathModeGoToPointInAStraightLineAndStop;
+        // currentpoint.headingMode = DJIWaypointV2HeadingModeAuto;
+        // currentpoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
+        // [self.waypoints addObject:currentpoint];
+        
+        // location = origin;
+        // location.longitude += 0.00006;
+        
+        // currentpoint = [[DJIWaypointV2 alloc] initWithCoordinate:location];
+        // currentpoint.altitude = 3;
+        // currentpoint.autoFlightSpeed = 0.5;
+        // currentpoint.maxFlightSpeed = 1;
+        // currentpoint.flightPathMode = DJIWaypointV2FlightPathModeGoToPointInAStraightLineAndStop;
+        // currentpoint.headingMode = DJIWaypointV2HeadingModeAuto;
+        // currentpoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
+        // [self.waypoints addObject:currentpoint];
+    }
+    
+    // Point from touch of map
     DJIWaypointV2 *waypoint = [[DJIWaypointV2 alloc] initWithCoordinate:touchedCoordinate];
     //default setting
+    /*
     waypoint.altitude = 30;
     waypoint.autoFlightSpeed = 8;
     waypoint.maxFlightSpeed = 12;
     waypoint.flightPathMode = DJIWaypointV2FlightPathModeGoToPointInAStraightLineAndStop;
     waypoint.headingMode = DJIWaypointV2HeadingModeAuto;
+    waypoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
     [self.waypoints addObject:waypoint];
+     */
     DJIWaypointAnnotation *wpAnnotation = [[DJIWaypointAnnotation alloc] init];
     [wpAnnotation setCoordinate:waypoint.coordinate];
     wpAnnotation.text = [NSString stringWithFormat:@"%d",(int)self.waypoints.count - 1];
-    
+     
     [self.mapView addAnnotations:@[wpAnnotation]];
     [self.waypointAnnotations addObjectsFromArray:@[wpAnnotation]];
 }
@@ -331,6 +488,7 @@ static NSUInteger kMissionId = 1001;
 - (void)flightController:(DJIFlightController *)fc didUpdateState:(DJIFlightControllerState *)state {
     self.currentState = state;
     self.aircraftLocation = state.aircraftLocation.coordinate;
+    self.aircraftAltitude = state.aircraftLocation.altitude;
     self.djiMapView.simulating = fc.simulator.isSimulatorActive;
 
     if (CLLocationCoordinate2DIsValid(state.aircraftLocation.coordinate)) {
@@ -343,6 +501,12 @@ static NSUInteger kMissionId = 1001;
         [self.djiMapView updateHomeLocation:state.homeLocation.coordinate];
     }
 
+}
+
+- (void)rtk:(DJIRTK *_Nonnull)rtk didUpdateState:(DJIRTKState *_Nonnull)state {
+    self.rtkAircraftLocation = state.mobileStationFusionLocation;
+    self.rtkAircraftAltitude = state.mobileStationFusionAltitude;
+    self.rtkActive = state.isRTKBeingUsed;
 }
 
 - (IBAction)onUploadActionButtonClicked:(id)sender {
