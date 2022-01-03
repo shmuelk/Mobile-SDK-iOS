@@ -330,6 +330,11 @@ static NSUInteger kMissionId = 1001;
         currentpoint.turnMode = DJIWaypointV2TurnModeCounterClockwise;
         [self.waypoints addObject:currentpoint];
         
+        NSLog(@"===> Current location (GPS): lat=%.9f, long=%.9f",
+              self.aircraftLocation.latitude, self.aircraftLocation.longitude);
+        NSLog(@"===> Current location (RTK): lat=%.9f, long=%.9f",
+              self.rtkAircraftLocation.latitude, self.rtkAircraftLocation.longitude);
+        NSLog(@"===> RTK is %s being used", self.rtkActive ? "" : "NOT");
         NSLog(@"===> Preparing mission, origin: lat=%.9f, long=%.9f",
               origin.latitude, origin.longitude);
         NSLog(@"===> Preparing mission, target location: lat=%.9f, long=%.9f",
